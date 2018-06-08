@@ -7,19 +7,121 @@ output:
 
 
 ## Loading and preprocessing the data
+```{r}
+# read data from "activity.csv"
+rawData <- read.csv("activity.csv")
 
+
+# change date format to date from factor
+rawData$date <- as.Date(rawData$date, "%Y-%m-%d",stringAsFactors = FALSE)
+
+# change interval time format to "00:00"
+tempTime <- as.character(rawData$interval)
+zeroChar <- mapply(function(x,y) {
+        paste0(rep(x,y), collapse = "")}, 
+        0, (4-nchar(tempTime))
+        )
+tempTimeChar <- paste0(zeroChar, tempTime)
+tempTimeChar <- format(strptime(tempTimeChar, format="%H%M"), format = "%H:%M")
+
+# add date and time variable
+tempTime <- paste(as.character(rawData$date), tempTimeChar)
+rawData$time <- as.POSIXct(tempTime, format="%Y-%m-%d %H:%M")
+```
 
 
 ## What is mean total number of steps taken per day?
+```{r}
+# total number of steps per day
+totalStepsDay <- tapply(rawData$steps, rawData$date, sum)
 
-
+# Mean and Median of the total number of steps per day
+meanTotalStepsDay <- mean(totalStepsDay, na.rm = TRUE)
+medianTotalStepDay <- median(totalStepsDay, na.rm=TRUE)
+```
+The mean and median of the total number of steps taken per day are `r meanTotalStepsDay` and `r medianTotalStepDay` respectively.
 
 ## What is the average daily activity pattern?
+```{r}
+# average across all days per the 5-minute interval
+meanStepsPerInterval <- tapply(rawData$steps, format(rawData$time, format ="%H:%M"), mean, na.rm=TRUE )
 
+AvgPerInterval <- data.frame(AvgStepsInterval= meanStepsPerInterval, Interval=strptime(names(meanStepsPerInterval),"%H:%M"), row.names = NULL, stringsAsFactors = FALSE )
 
+peakInterval <- AvgPerInterval$Interval[which.max(AvgPerInterval$AvgStepsInterval)]
+peakIntervalChar <- format(peakInterval, format = "%H:%M")
+
+# Ploting the 5-minute interval (x-axis) and the average number of steps taken, average across all days(y-axis)
+plot(AvgPerInterval$Interval, AvgPerInterval$AvgStepsInterval, xlab= "5-Min Interval", ylab = "Average Steps Across Days", type = "l", main="Daily Steps Pattern" )
+
+abline(v=peakInterval, lty=1, lwd=1, col="red")
+
+text(peakInterval, 150, labels = paste("peak interval = ",peakIntervalChar), col="red")
+
+# average steps per day
+meanStepsDay <- tapply(rawData$steps, rawData$date, mean)
+
+```
+
+The steps incrase from around 6am eand decline from 6pm. The number of steps stays zero from 11pm to 5am. 
+
+The period with the highest average steps across the days is `r peakIntervalChar`.  
 
 ## Imputing missing values
+```{r, echo=FALSE }
+# install mice package
+     x <- "mice"
+    if (!require(x,character.only=TRUE))
+    {
+        install.packages(pkgs=x,repos="http://cran.r-project.org")
+        require(x,character.only = TRUE)
+    }
 
+library(mice)
+```
+Check the NA pattern in the raw data.
+```{r}
+colSums(is.na(rawData))/nrow(rawData)
+```
+13% of steps are missing, and no missing in date and interval. 
+
+
+Impute missing values of steps the mice package using predictive mean matching (PMM) mathod.
+```{r}
+tempdata <- rawData[c(1,3)]
+imputTempData <- mice(tempdata, m=5, method = "pmm") 
+densityplot(imputTempData)
+xyplot(imputTempData, steps ~ interval,pch=18,cex=1)
+
+modelFit1 <- with(imputTempData,lm(steps ~ interval))
+summary(pool(modelFit1))
+
+imputeData <- complete(imputTempData, 2)
+```
+Compare average steps per interval betwen imputed and raw data.
+```{r}
+AvgImputeData <- tapply(imputeData$steps, imputeData$interval, mean)
+plot(AvgImputeData, xlab= "5-Min Interval", ylab = "Average Steps Across Days", type = "l", main="Daily Steps Pattern", col="red" )
+lines(AvgPerInterval$AvgStepsInterval, col="blue", ylab="n", ylab="n")
+legend("topright", legend = c("raw data", "imputed data"), col = c("blue", "red"), lty=1)
+
+# add the imputed data into the raw data set
+rawData$impSteps <- imputeData$steps
+```
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+```{r}
+wkends <- c("Saturday", "Sunday")
+rawData$weekday <- factor(weekdays(rawData$date, abbreviate = FALSE) %in% wkends, levels=c(TRUE, FALSE), labels = c("weekend", "weekday"))
+
+weekdayAVG <- tapply(rawData$steps[rawData$weekday=="weekday"], format(rawData$time[rawData$weekday=="weekday"], format ="%H:%M"), mean, na.rm=TRUE )
+weekendAVG <- tapply(rawData$steps[rawData$weekday=="weekend"], format(rawData$time[rawData$weekday=="weekend"], format ="%H:%M"), mean, na.rm=TRUE )
+
+plot(weekdayAVG, xlab= "5-Min Interval", ylab = "Average Steps Across Days", type = "l", main="Daily Steps Pattern", col="blue" )
+lines(weekendAVG, col="red", ylab="n", ylab="n")
+legend("topright", legend = c("weekday", "weekend"), col = c("blue", "red"), lty=1)
+
+```
+
+The patterns show that there are more steps on hearly morning on weekday, and more steps on most day time on weekend. 
